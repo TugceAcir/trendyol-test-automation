@@ -1,0 +1,103 @@
+# ============================================================
+# Java & Maven
+# ============================================================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# ============================================================
+# Maven
+# ============================================================
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ============================================================
+# IDE
+# ============================================================
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# VSCode
+.vscode/
+
+# NetBeans
+nbproject/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# ============================================================
+# Test Output & Reports
+# ============================================================
+test-output/
+reports/
+screenshots/
+logs/
+*.log
+
+# ============================================================
+# OS
+# ============================================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ============================================================
+# Selenium
+# ============================================================
+chromedriver.exe
+geckodriver.exe
+msedgedriver.exe
+chromedriver
+geckodriver
+msedgedriver
+
+# ============================================================
+# Temporary Files
+# ============================================================
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Security - Never commit sensitive data
+# ============================================================
+*.key
+*.pem
+secrets.properties
+credentials.properties
