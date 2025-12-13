@@ -5,10 +5,13 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
 import utils.ElementHelper;
 import utils.TurkishTextHelper;
 import utils.WaitHelper;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,13 +19,19 @@ import java.util.List;
  * SearchResultsPage - Trendyol search results page
  *
  * RESPONSIBILITIES:
- * - Product listing
- * - Price filtering (min-max)
- * - Sorting
- * - Product selection
+ * - Product listing and verification
+ * - Price filtering (min-max ranges)
+ * - Product selection and navigation
  * - Infinite scroll handling (lazy loading)
+ * - Brand and product name extraction
  *
- * URL: https://www.trendyol.com/sr?q=...
+ * URL PATTERN: https://www.trendyol.com/sr?q={keyword}
+ *
+ * TRENDYOL-SPECIFIC BEHAVIORS:
+ * - Products open in new tab (requires tab switching)
+ * - Lazy loading (24 products initial, more on scroll)
+ * - Brand and product name in separate HTML elements
+ * - Turkish number formatting (140.000 TL)
  */
 public class SearchResultsPage extends BasePage {
 
@@ -80,6 +89,12 @@ public class SearchResultsPage extends BasePage {
     private WebElement priceFilterHeader;
 
     /**
+     * "Did you mean" / No results banner
+     * TRENDYOL: Shows "Aradığın ürün bulunamadı. Aşağıdakiler ilgini çekebilir."
+     */
+    private static final By NO_RESULTS_BANNER = By.cssSelector(".did-you-mean .information-banner");
+
+    /**
      * Sorting dropdown
      * HTML: <button class="select-box">Önerilen Sıralama</button>
      */
@@ -87,33 +102,44 @@ public class SearchResultsPage extends BasePage {
     private WebElement sortingDropdown;
 
     // ============================================================
-    // DYNAMIC LOCATORS
+    // DYNAMIC LOCATORS - Robust selectors
     // ============================================================
 
     /**
-     * Product card by index
-     * @param index - product index (0-based)
+     * Product card by index (0-based)
      */
     private By getProductCardByIndex(int index) {
         return By.cssSelector("a.product-card:nth-of-type(" + (index + 1) + ")");
     }
 
     /**
-     * Product name locator
+     * Product brand locator (within product card)
+     * TRENDYOL SPECIFIC: Brand is separate from product name
      */
-    private By productNameLocator = By.cssSelector(".product-name");
+    private static final By PRODUCT_BRAND_LOCATOR = By.cssSelector(".product-brand");
 
     /**
-     * Product price locator
+     * Product name locator (within product card)
+     * TRENDYOL SPECIFIC: Name excludes brand
      */
-    private By productPriceLocator = By.cssSelector(".discounted-price");
+    private static final By PRODUCT_NAME_LOCATOR = By.cssSelector(".product-name");
+
+    /**
+     * Product price locator (discounted price)
+     */
+    private static final By PRODUCT_PRICE_LOCATOR = By.cssSelector(".discounted-price");
+
+    /**
+     * No results indicator
+     */
+    private static final By NO_RESULTS_LOCATOR = By.cssSelector(".empty-result");
 
     // ============================================================
     // CONSTRUCTOR
     // ============================================================
 
     /**
-     * Constructor
+     * Constructor - Initializes page and waits for results
      *
      * @param driver - WebDriver instance
      */
@@ -121,11 +147,11 @@ public class SearchResultsPage extends BasePage {
         super(driver);
         logger.info("SearchResultsPage initialized");
 
-        // Wait for search results to load
+        // Wait for page to be ready (RULES: smart wait, no hardWait)
         WaitHelper.waitForPageLoad(driver);
         WaitHelper.waitForAjaxToComplete(driver);
 
-        // Wait for products to appear
+        // Wait for products to load
         waitForProductsToLoad();
 
         // Verify we're on search results page
@@ -137,29 +163,31 @@ public class SearchResultsPage extends BasePage {
     // ============================================================
 
     /**
-     * Verify search results page loaded
+     * Verify search results page loaded successfully
      *
      * CHECKS:
-     * - URL contains "/sr"
-     * - Search title displayed
-     * - At least 1 product displayed
+     * - URL contains "/sr" (search results identifier)
+     * - Search title is displayed
+     * - At least 1 product card is visible
+     *
+     * RULES: Fail-safe, logs warnings instead of throwing
      */
     public void verifySearchResultsPage() {
         try {
             logger.info("Verifying search results page");
 
-            // Check URL
+            // Verify URL
             String currentUrl = getCurrentUrl();
             if (!currentUrl.contains("/sr")) {
-                logger.warn("Not on search results page. URL: {}", currentUrl);
+                logger.warn("URL verification failed. Expected '/sr' in URL, got: {}", currentUrl);
             }
 
-            // Check search title
+            // Verify search title visible
             WaitHelper.waitForElementVisible(driver, searchTitle, Timeouts.ELEMENT_VISIBLE);
 
-            // Check products
+            // Verify products loaded
             if (productCards.isEmpty()) {
-                logger.warn("No products found on page");
+                logger.warn("No products visible on search results page");
             } else {
                 logger.info("Search results page verified: {} products visible", productCards.size());
             }
@@ -170,24 +198,38 @@ public class SearchResultsPage extends BasePage {
     }
 
     /**
-     * Wait for products to load
+     * Wait for products to load (OPTIMIZED)
      *
-     * WHY: Trendyol uses lazy loading, products load gradually
+     * RULES COMPLIANCE:
+     * - Uses smart polling (WebDriverWait)
+     * - No hardWait/Thread.sleep
+     * - Fail-safe with try-catch
+     *
+     * WHY: Trendyol uses lazy loading, products appear gradually
      */
     private void waitForProductsToLoad() {
         try {
             logger.debug("Waiting for products to load");
 
-            // Wait for at least 1 product card
-            WaitHelper.waitForElementVisible(driver, By.cssSelector("a.product-card"), Timeouts.SEARCH_RESULTS_LOAD);
+            // Smart wait for at least 1 product card (RULES: explicit wait)
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(Timeouts.SEARCH_RESULTS_LOAD));
+            wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("a.product-card")));
 
-            // Small delay for images to load
-            WaitHelper.hardWait(1000);
+            // Wait for product images to load (check if first product has image src)
+            wait.until(driver -> {
+                try {
+                    WebElement firstProductImage = driver.findElement(By.cssSelector("a.product-card img"));
+                    String src = firstProductImage.getAttribute("src");
+                    return src != null && !src.isEmpty();
+                } catch (Exception e) {
+                    return false;
+                }
+            });
 
             logger.debug("Products loaded successfully");
 
         } catch (Exception e) {
-            logger.warn("Products not loaded within timeout", e);
+            logger.warn("Products not fully loaded within timeout - continuing anyway", e);
         }
     }
 
@@ -199,6 +241,7 @@ public class SearchResultsPage extends BasePage {
      * Get total product count from page
      *
      * PARSES: "67049+ Ürün" → 67049
+     * RULES: Fail-safe, returns 0 on error
      *
      * @return product count (0 if unable to parse)
      */
@@ -213,7 +256,7 @@ public class SearchResultsPage extends BasePage {
             String countText = ElementHelper.safeGetText(driver, resultCountInfo);
             logger.debug("Product count text: '{}'", countText);
 
-            // Parse number (remove non-digits except +)
+            // Parse number (remove all non-digits)
             String numberOnly = countText.replaceAll("[^0-9]", "");
 
             if (!numberOnly.isEmpty()) {
@@ -235,6 +278,7 @@ public class SearchResultsPage extends BasePage {
      * Get number of product cards currently visible on page
      *
      * NOTE: Due to lazy loading, this may be less than total count
+     * RULES: Simple, deterministic, no side effects
      *
      * @return number of visible products
      */
@@ -250,9 +294,9 @@ public class SearchResultsPage extends BasePage {
     }
 
     /**
-     * Get search keyword from title
+     * Get search keyword from page title
      *
-     * @return search keyword
+     * @return search keyword (empty string on error)
      */
     public String getSearchKeyword() {
         try {
@@ -277,14 +321,36 @@ public class SearchResultsPage extends BasePage {
     /**
      * Check if "no results" message displayed
      *
-     * @return true if no results found
+     * TRENDYOL SPECIFIC:
+     * - Shows "Aradığın ürün bulunamadı. Aşağıdakiler ilgini çekebilir."
+     * - Still displays recommended products below
+     * - This is NOT an empty state, it's a "did you mean" scenario
+     *
+     * @return true if no results banner displayed
      */
     public boolean isNoResultsMessageDisplayed() {
         try {
-            // Trendyol shows empty state when no results
-            By noResultsLocator = By.cssSelector(".empty-result");
-            return ElementHelper.isElementPresent(driver, noResultsLocator);
+            // Check for "did you mean" banner (Aradığın ürün bulunamadı)
+            boolean bannerPresent = ElementHelper.isElementPresent(driver, NO_RESULTS_BANNER);
+
+            if (bannerPresent) {
+                logger.info("No results banner detected: search returned no matching products");
+                return true;
+            }
+
+            // Fallback: check for empty state (no products at all)
+            By emptyStateLocator = By.cssSelector(".empty-result");
+            boolean emptyState = ElementHelper.isElementPresent(driver, emptyStateLocator);
+
+            if (emptyState) {
+                logger.info("Empty state detected: absolutely no products");
+                return true;
+            }
+
+            return false;
+
         } catch (Exception e) {
+            logger.debug("Error checking no results message", e);
             return false;
         }
     }
@@ -307,19 +373,22 @@ public class SearchResultsPage extends BasePage {
      * Click product by index
      *
      * INDEX: 0-based (0 = first product, 1 = second, etc.)
-     *
-     * IMPORTANT: Opens in new tab!
+     * IMPORTANT: Opens in new tab - requires tab switching
+     * RULES: Validates input, meaningful error messages
      *
      * @param index - product index
+     * @throws IllegalArgumentException if index out of bounds
      */
     public void clickProductByIndex(int index) {
         try {
             logger.info("Clicking product at index: {}", index);
 
-            // Check if index valid
+            // Validate index (RULES: no hardcoded assumptions)
             if (index < 0 || index >= productCards.size()) {
-                logger.error("Invalid product index: {}. Available: {}", index, productCards.size());
-                throw new IllegalArgumentException("Product index out of bounds: " + index);
+                String errorMsg = String.format("Product index %d out of bounds. Available products: %d",
+                        index, productCards.size());
+                logger.error(errorMsg);
+                throw new IllegalArgumentException(errorMsg);
             }
 
             // Get product element
@@ -332,36 +401,73 @@ public class SearchResultsPage extends BasePage {
             ElementHelper.safeClick(driver, product);
             logger.info("Product clicked at index: {}", index);
 
-            // Wait a bit for new tab to open
-            WaitHelper.hardWait(1000);
+            // Brief pause for new tab to open (OPTIMIZED: microPause instead of hardWait)
+            WaitHelper.microPause();
 
+        } catch (IllegalArgumentException e) {
+            throw e; // Re-throw validation errors
         } catch (Exception e) {
             logger.error("Error clicking product at index: {}", index, e);
-            throw e;
+            throw new RuntimeException("Failed to click product at index: " + index, e);
         }
     }
 
+    // ============================================================
+    // PRODUCT NAME EXTRACTION (TRENDYOL-SPECIFIC)
+    // ============================================================
+
     /**
-     * Get product name by index
+     * Get product FULL NAME by index (Brand + Product Name)
      *
-     * @param index - product index
-     * @return product name
+     * TRENDYOL SPECIFIC:
+     * - Brand and name are in separate HTML elements
+     * - Brand: <span class="product-brand">Samsung</span>
+     * - Name: <span class="product-name">Galaxy A16 4 Gb Ram 128 Gb Gri</span>
+     * - Full: "Samsung Galaxy A16 4 Gb Ram 128 Gb Gri"
+     *
+     * RULES COMPLIANCE:
+     * - Single Responsibility: Combines brand + name
+     * - Fail-safe: Returns partial info if available
+     * - Meaningful logging
+     *
+     * @param index - product index (0-based)
+     * @return full product name (brand + name) or empty string on error
      */
     public String getProductNameByIndex(int index) {
         try {
-            logger.debug("Getting product name at index: {}", index);
+            logger.debug("Getting product full name at index: {}", index);
 
+            // Validate index
             if (index < 0 || index >= productCards.size()) {
-                logger.error("Invalid product index: {}", index);
+                logger.error("Invalid product index: {}. Available: {}", index, productCards.size());
                 return "";
             }
 
             WebElement product = productCards.get(index);
-            WebElement nameElement = product.findElement(productNameLocator);
 
-            String name = ElementHelper.safeGetText(driver, nameElement);
-            logger.debug("Product name at index {}: '{}'", index, name);
-            return name;
+            // Extract brand name (may not exist for some products)
+            String brandName = "";
+            try {
+                WebElement brandElement = product.findElement(PRODUCT_BRAND_LOCATOR);
+                brandName = ElementHelper.safeGetText(driver, brandElement).trim();
+            } catch (Exception e) {
+                logger.debug("No brand element found at index {} (some products don't have brands)", index);
+            }
+
+            // Extract product name (always exists)
+            String productName = "";
+            try {
+                WebElement nameElement = product.findElement(PRODUCT_NAME_LOCATOR);
+                productName = ElementHelper.safeGetText(driver, nameElement).trim();
+            } catch (Exception e) {
+                logger.warn("No product name element found at index {}", index);
+            }
+
+            // Combine: "Samsung Galaxy A16..." or just "Galaxy A16..." if no brand
+            String fullName = brandName.isEmpty() ? productName : brandName + " " + productName;
+
+            logger.debug("Product full name at index {}: '{}'", index, fullName);
+            return fullName;
 
         } catch (Exception e) {
             logger.error("Error getting product name at index: {}", index, e);
@@ -370,9 +476,51 @@ public class SearchResultsPage extends BasePage {
     }
 
     /**
+     * Get product BRAND by index
+     *
+     * USE CASE: When you only need brand for validation
+     * EXAMPLE: Verify all products are from "Samsung"
+     *
+     * @param index - product index (0-based)
+     * @return brand name or empty string if no brand/error
+     */
+    public String getProductBrandByIndex(int index) {
+        try {
+            logger.debug("Getting product brand at index: {}", index);
+
+            // Validate index
+            if (index < 0 || index >= productCards.size()) {
+                logger.error("Invalid product index: {}. Available: {}", index, productCards.size());
+                return "";
+            }
+
+            WebElement product = productCards.get(index);
+
+            try {
+                WebElement brandElement = product.findElement(PRODUCT_BRAND_LOCATOR);
+                String brand = ElementHelper.safeGetText(driver, brandElement).trim();
+                logger.debug("Product brand at index {}: '{}'", index, brand);
+                return brand;
+            } catch (Exception e) {
+                logger.debug("No brand element at index {} (some products don't have explicit brand)", index);
+                return "";
+            }
+
+        } catch (Exception e) {
+            logger.error("Error getting product brand at index: {}", index, e);
+            return "";
+        }
+    }
+
+    // ============================================================
+    // PRODUCT PRICE EXTRACTION
+    // ============================================================
+
+    /**
      * Get product price by index
      *
      * RETURNS: Raw text like "140.000 TL"
+     * RULES: Fail-safe, returns empty string on error
      *
      * @param index - product index
      * @return product price as string
@@ -382,12 +530,12 @@ public class SearchResultsPage extends BasePage {
             logger.debug("Getting product price at index: {}", index);
 
             if (index < 0 || index >= productCards.size()) {
-                logger.error("Invalid product index: {}", index);
+                logger.error("Invalid product index: {}. Available: {}", index, productCards.size());
                 return "";
             }
 
             WebElement product = productCards.get(index);
-            WebElement priceElement = product.findElement(productPriceLocator);
+            WebElement priceElement = product.findElement(PRODUCT_PRICE_LOCATOR);
 
             String price = ElementHelper.safeGetText(driver, priceElement);
             logger.debug("Product price at index {}: '{}'", index, price);
@@ -400,12 +548,13 @@ public class SearchResultsPage extends BasePage {
     }
 
     /**
-     * Get product price as double (parsed)
+     * Get product price as double (parsed for calculations)
      *
      * EXAMPLE: "140.000 TL" → 140000.0
+     * RULES: Uses utility class (DRY), handles Turkish formatting
      *
      * @param index - product index
-     * @return price as double
+     * @return price as double (0.0 on error)
      */
     public double getProductPriceAsDoubleByIndex(int index) {
         String priceText = getProductPriceByIndex(index);
@@ -420,40 +569,46 @@ public class SearchResultsPage extends BasePage {
      * Expand price filter section
      *
      * WHY: Price filter is collapsed by default
+     * RULES: Idempotent (safe to call multiple times)
      */
     public void expandPriceFilter() {
         try {
             logger.info("Expanding price filter");
 
-            // Check if already expanded
+            // Check if already expanded (RULES: no unnecessary actions)
             By containerLocator = By.cssSelector("section[data-aggregationtype='Price'] .aggregation-container");
             WebElement container = driver.findElement(containerLocator);
 
-            // Check if hidden attribute exists
             String hiddenAttr = container.getAttribute("hidden");
             if (hiddenAttr != null) {
-                // Collapsed, click to expand
+                // Collapsed - click to expand
                 ElementHelper.safeClick(driver, priceFilterHeader);
-                WaitHelper.hardWait(500); // Wait for animation
+
+                // Wait for animation (OPTIMIZED: microPause)
+                WaitHelper.microPause();
+                WaitHelper.microPause(); // 400ms total for animation
+
                 logger.info("Price filter expanded");
             } else {
-                logger.debug("Price filter already expanded");
+                logger.debug("Price filter already expanded - no action needed");
             }
 
         } catch (Exception e) {
-            logger.warn("Error expanding price filter", e);
+            logger.warn("Error expanding price filter - may already be expanded", e);
         }
     }
 
     /**
-     * Apply price filter (min-max)
+     * Apply price filter (min-max range)
      *
      * FLOW:
-     * 1. Expand price filter
+     * 1. Expand price filter if collapsed
      * 2. Enter min price
      * 3. Enter max price
      * 4. Click search button
      * 5. Wait for results to reload
+     *
+     * RULES: Clear, sequential steps with logging
      *
      * @param minPrice - minimum price
      * @param maxPrice - maximum price
@@ -480,7 +635,7 @@ public class SearchResultsPage extends BasePage {
             ElementHelper.safeClick(driver, priceSearchButton);
             logger.info("Price filter search button clicked");
 
-            // Wait for results to reload
+            // Wait for results to reload (RULES: smart wait, no hardWait)
             WaitHelper.waitForPageLoad(driver);
             WaitHelper.waitForAjaxToComplete(driver);
             waitForProductsToLoad();
@@ -488,8 +643,8 @@ public class SearchResultsPage extends BasePage {
             logger.info("Price filter applied successfully");
 
         } catch (Exception e) {
-            logger.error("Error applying price filter", e);
-            throw e;
+            logger.error("Error applying price filter: min={}, max={}", minPrice, maxPrice, e);
+            throw new RuntimeException("Failed to apply price filter", e);
         }
     }
 
@@ -515,8 +670,8 @@ public class SearchResultsPage extends BasePage {
             logger.info("Min price filter applied");
 
         } catch (Exception e) {
-            logger.error("Error applying min price filter", e);
-            throw e;
+            logger.error("Error applying min price filter: {}", minPrice, e);
+            throw new RuntimeException("Failed to apply min price filter", e);
         }
     }
 
@@ -542,8 +697,8 @@ public class SearchResultsPage extends BasePage {
             logger.info("Max price filter applied");
 
         } catch (Exception e) {
-            logger.error("Error applying max price filter", e);
-            throw e;
+            logger.error("Error applying max price filter: {}", maxPrice, e);
+            throw new RuntimeException("Failed to apply max price filter", e);
         }
     }
 
@@ -552,10 +707,14 @@ public class SearchResultsPage extends BasePage {
     // ============================================================
 
     /**
-     * Scroll down to load more products
+     * Scroll down to load more products (OPTIMIZED)
      *
      * WHY: Trendyol uses infinite scroll / lazy loading
      * Products below fold don't load until you scroll
+     *
+     * RULES COMPLIANCE:
+     * - Smart wait for new products to appear (not hardWait)
+     * - Logs progress for debugging
      *
      * @param scrollCount - how many times to scroll down
      */
@@ -564,17 +723,25 @@ public class SearchResultsPage extends BasePage {
             logger.info("Scrolling to load more products (scroll count: {})", scrollCount);
 
             for (int i = 0; i < scrollCount; i++) {
+                int beforeScrollCount = getVisibleProductCount();
+
                 // Scroll to bottom
                 ElementHelper.scrollToBottom(driver);
 
-                // Wait for products to load
-                WaitHelper.hardWait(2000);
+                // Smart wait for new products to load (OPTIMIZED: explicit wait)
+                try {
+                    WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(3));
+                    wait.until(driver -> getVisibleProductCount() > beforeScrollCount);
+                } catch (Exception e) {
+                    logger.debug("No new products loaded after scroll {} (may be at end)", i + 1);
+                }
 
-                logger.debug("Scroll iteration: {}/{}", i + 1, scrollCount);
+                logger.debug("Scroll iteration: {}/{}. Products now: {}",
+                        i + 1, scrollCount, getVisibleProductCount());
             }
 
-            int visibleCount = getVisibleProductCount();
-            logger.info("After scrolling, visible products: {}", visibleCount);
+            int finalCount = getVisibleProductCount();
+            logger.info("After scrolling {} times, visible products: {}", scrollCount, finalCount);
 
         } catch (Exception e) {
             logger.error("Error scrolling to load products", e);
@@ -584,7 +751,8 @@ public class SearchResultsPage extends BasePage {
     /**
      * Scroll to specific product index
      *
-     * USE CASE: Product at index 50, need to scroll to see it
+     * USE CASE: Product at index 50, need to scroll to make it visible
+     * RULES: Smart approach, scrolls only if needed
      *
      * @param index - product index
      */
@@ -593,15 +761,18 @@ public class SearchResultsPage extends BasePage {
             logger.info("Scrolling to product at index: {}", index);
 
             if (index < productCards.size()) {
+                // Product already visible - just scroll to it
                 WebElement product = productCards.get(index);
                 ElementHelper.scrollToElement(driver, product);
             } else {
-                logger.warn("Product index {} not visible yet, scrolling down", index);
+                // Product not visible yet - scroll to load more
+                logger.warn("Product index {} not visible yet. Current: {}. Scrolling to load more.",
+                        index, productCards.size());
                 scrollToLoadMoreProducts(3);
             }
 
         } catch (Exception e) {
-            logger.error("Error scrolling to product", e);
+            logger.error("Error scrolling to product at index: {}", index, e);
         }
     }
 }
