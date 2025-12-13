@@ -1,14 +1,19 @@
 package pages;
 
+import org.openqa.selenium.JavascriptExecutor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.PageFactory;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+import org.openqa.selenium.TimeoutException;
 import utils.ElementHelper;
 import utils.WaitHelper;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,92 +56,107 @@ public class BasePage {
     }
 
     // ============================================================
-    // POPUP HANDLING - Critical for Trendyol!
+    // POPUP HANDLING - ULTRA OPTIMIZED!
     // ============================================================
 
     /**
      * Handle all Trendyol popups
      *
-     * STRATEGY:
-     * 1. Wait 2 seconds for gender popup
-     * 2. Close gender popup if present
-     * 3. Wait 5 seconds for cookie banner
-     * 4. Accept cookies if present
-     *
-     * WHY THIS ORDER:
-     * - Gender popup appears immediately
-     * - Cookie banner appears ~5 seconds after
-     *
-     * CALL THIS: After page load in HomePage
+     * ULTRA FAST: Smart waits, no hardWait waste
+     * MAX TIME: ~3 seconds (if both popups present)
+     * MIN TIME: ~0.2 seconds (if no popups)
      */
     public void handlePopups() {
         logger.info("Handling Trendyol popups");
-
-        // Handle gender selection popup (appears immediately)
-        closeGenderPopup();
-
-        // Handle cookie banner (appears after ~5 seconds)
-        WaitHelper.hardWait(5000); // Wait for cookie banner
-        acceptCookies();
-
+        closePopupsQuick();
         logger.info("All popups handled");
+    }
+
+    /**
+     * Quick popup closer - OPTIMIZED for speed
+     *
+     * STRATEGY:
+     * 1. Instant check for gender popup (no wait)
+     * 2. Smart wait for cookie banner (max 3s)
+     * 3. Micro pauses only (200ms)
+     */
+    private void closePopupsQuick() {
+        // Gender popup - INSTANT CHECK (no wait if not present)
+        try {
+            WebElement genderClose = driver.findElement(GENDER_POPUP_CLOSE);
+            if (genderClose.isDisplayed()) {
+                genderClose.click();
+                logger.info("Gender popup closed");
+                microPause();
+            }
+        } catch (Exception e) {
+            // No gender popup - continue immediately
+            logger.debug("No gender popup detected");
+        }
+
+        // Cookie banner - SMART WAIT (max 3 seconds)
+        try {
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(3));
+            WebElement cookieBtn = wait.until(ExpectedConditions.elementToBeClickable(COOKIE_ACCEPT_BTN));
+            cookieBtn.click();
+            logger.info("Cookies accepted");
+            microPause();
+        } catch (TimeoutException e) {
+            // No cookie banner within 3 seconds - continue
+            logger.debug("No cookie banner detected");
+        } catch (Exception e) {
+            logger.warn("Cookie handling exception: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Micro pause - very short wait (200ms)
+     * USE: After quick actions like popup close
+     */
+    private void microPause() {
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
      * Close gender selection popup (Kadın/Erkek)
      *
-     * POPUP: "Aradığın her şey Trendyol'da!"
-     * APPEARS: Immediately on page load
+     * DEPRECATED: Use handlePopups() instead
+     * Kept for backward compatibility
      */
+    @Deprecated
     public void closeGenderPopup() {
         try {
-            logger.debug("Checking for gender popup");
-
-            // Wait max 3 seconds for popup
-            WaitHelper.hardWait(2000);
-
-            if (ElementHelper.isElementPresent(driver, GENDER_POPUP)) {
-                logger.info("Gender popup detected, closing...");
-                ElementHelper.safeClick(driver, GENDER_POPUP_CLOSE);
-
-                // Wait for popup to disappear
-                WaitHelper.waitForElementInvisible(driver, GENDER_POPUP, 5);
-                logger.info("Gender popup closed successfully");
-            } else {
-                logger.debug("Gender popup not present");
+            WebElement closeButton = driver.findElement(GENDER_POPUP_CLOSE);
+            if (closeButton.isDisplayed()) {
+                closeButton.click();
+                microPause();
+                logger.info("Gender popup closed");
             }
-
         } catch (Exception e) {
-            logger.warn("Could not close gender popup (might not be present): {}", e.getMessage());
+            logger.debug("No gender popup");
         }
     }
 
     /**
      * Accept cookie banner
      *
-     * BANNER: "SANA ÖZEL BİR DENEYİM İÇİN ÇALIŞIYORUZ"
-     * APPEARS: ~5 seconds after page load
+     * DEPRECATED: Use handlePopups() instead
+     * Kept for backward compatibility
      */
+    @Deprecated
     public void acceptCookies() {
         try {
-            logger.debug("Checking for cookie banner");
-
-            if (ElementHelper.isElementPresent(driver, COOKIE_BANNER)) {
-                logger.info("Cookie banner detected, accepting...");
-
-                // Wait for accept button to be clickable
-                WaitHelper.waitForElementClickable(driver, COOKIE_ACCEPT_BTN, 5);
-                ElementHelper.safeClick(driver, COOKIE_ACCEPT_BTN);
-
-                // Wait for banner to disappear
-                WaitHelper.waitForElementInvisible(driver, COOKIE_BANNER, 5);
-                logger.info("Cookies accepted successfully");
-            } else {
-                logger.debug("Cookie banner not present");
-            }
-
-        } catch (Exception e) {
-            logger.warn("Could not accept cookies (might not be present): {}", e.getMessage());
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(3));
+            WebElement cookieBtn = wait.until(ExpectedConditions.elementToBeClickable(COOKIE_ACCEPT_BTN));
+            cookieBtn.click();
+            microPause();
+            logger.info("Cookies accepted");
+        } catch (TimeoutException e) {
+            logger.debug("No cookie banner");
         }
     }
 

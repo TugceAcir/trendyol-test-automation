@@ -360,4 +360,15 @@ public class WaitHelper {
     public static void waitForAjaxToComplete(WebDriver driver) {
         waitForAjaxToComplete(driver, Timeouts.AJAX_TIMEOUT);
     }
+    /**
+     * Micro pause - very short wait (200ms)
+     * USE: After quick actions like popup close
+     */
+    public static void microPause() {
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 }

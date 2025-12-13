@@ -1,5 +1,6 @@
 package pages;
 
+import org.openqa.selenium.JavascriptExecutor;
 import constants.Timeouts;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
@@ -189,20 +190,20 @@ public class HomePage extends BasePage {
         try {
             logger.info("Searching for: '{}'", keyword);
 
-            // Wait for search box
-            WaitHelper.waitForElementVisible(driver, searchBox, Timeouts.ELEMENT_VISIBLE);
+            // Wait for search box - TIMEOUT AZALT
+            WaitHelper.waitForElementVisible(driver, searchBox, 3); // 10 → 3
 
-            // Type keyword
-            ElementHelper.safeSendKeys(driver, searchBox, keyword);
+            // Clear and type - NO EXTRA WAIT
+            searchBox.clear();
+            searchBox.sendKeys(keyword);
             logger.info("Keyword entered: '{}'", keyword);
 
-            // Click search icon
-            ElementHelper.safeClick(driver, searchIcon);
+            // Click search icon - JAVASCRIPT CLICK!
+            ((JavascriptExecutor) driver).executeScript("arguments[0].click();", searchIcon);
             logger.info("Search icon clicked");
 
             // Wait for results page
             WaitHelper.waitForPageLoad(driver);
-            WaitHelper.waitForAjaxToComplete(driver);
 
             logger.info("Search completed for: '{}'", keyword);
 
@@ -211,7 +212,6 @@ public class HomePage extends BasePage {
             throw e;
         }
     }
-
     /**
      * Type in search box (without submitting)
      *
