@@ -278,7 +278,60 @@ public class BasePage {
     public int getTabCount() {
         return driver.getWindowHandles().size();
     }
+    /**
+     * Wait for new tab to open
+     *
+     * TRENDYOL: Product clicks open new tab
+     * STRATEGY: Smart wait (max 5s) until tab count increases
+     *
+     * @param expectedCount Expected number of tabs after opening
+     * @return true if new tab opened
+     */
+    public boolean waitForNewTab(int expectedCount) {
+        try {
+            logger.debug("Waiting for new tab (expected count: {})", expectedCount + 1);
 
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            wait.until(driver -> driver.getWindowHandles().size() > expectedCount);
+
+            logger.info("New tab opened successfully");
+            return true;
+
+        } catch (TimeoutException e) {
+            logger.warn("Timeout waiting for new tab");
+            return false;
+        } catch (Exception e) {
+            logger.error("Error waiting for new tab", e);
+            return false;
+        }
+    }
+
+    /**
+     * Switch to newest tab (not original window)
+     *
+     * TRENDYOL: After clicking product, switch to product detail tab
+     *
+     * @param originalWindow Original window handle to skip
+     */
+    public void switchToNewTab(String originalWindow) {
+        try {
+            logger.debug("Switching to new tab (excluding original: {})", originalWindow);
+
+            for (String handle : driver.getWindowHandles()) {
+                if (!handle.equals(originalWindow)) {
+                    driver.switchTo().window(handle);
+                    logger.info("Switched to new tab successfully");
+                    WaitHelper.waitForPageLoad(driver);
+                    return;
+                }
+            }
+
+            logger.warn("No new tab found to switch to");
+
+        } catch (Exception e) {
+            logger.error("Error switching to new tab", e);
+        }
+    }
     // ============================================================
     // COMMON PAGE METHODS
     // ============================================================
@@ -365,4 +418,5 @@ public class BasePage {
     protected boolean isElementEnabled(WebElement element) {
         return ElementHelper.isEnabled(element);
     }
+
 }

@@ -707,47 +707,64 @@ public class SearchResultsPage extends BasePage {
     // ============================================================
 
     /**
-     * Scroll down to load more products (OPTIMIZED)
+     * Scroll to load more products (infinite scroll)
      *
-     * WHY: Trendyol uses infinite scroll / lazy loading
-     * Products below fold don't load until you scroll
+     * TRENDYOL LAZY LOADING:
+     * - Scroll to LAST product (not just bottom)
+     * - Products load when last product enters viewport
      *
-     * RULES COMPLIANCE:
-     * - Smart wait for new products to appear (not hardWait)
-     * - Logs progress for debugging
-     *
-     * @param scrollCount - how many times to scroll down
+     * @param scrollCount Number of times to scroll
      */
     public void scrollToLoadMoreProducts(int scrollCount) {
-        try {
-            logger.info("Scrolling to load more products (scroll count: {})", scrollCount);
-
-            for (int i = 0; i < scrollCount; i++) {
+        for (int i = 0; i < scrollCount; i++) {
+            try {
                 int beforeScrollCount = getVisibleProductCount();
+                logger.info("Before scroll " + (i + 1) + ": " + beforeScrollCount + " products");
 
-                // Scroll to bottom
-                ElementHelper.scrollToBottom(driver);
+                // Get all product cards
+                java.util.List<org.openqa.selenium.WebElement> products =
+                        driver.findElements(By.cssSelector("a.product-card"));
 
-                // Smart wait for new products to load (OPTIMIZED: explicit wait)
-                try {
-                    WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(3));
-                    wait.until(driver -> getVisibleProductCount() > beforeScrollCount);
-                } catch (Exception e) {
-                    logger.debug("No new products loaded after scroll {} (may be at end)", i + 1);
+                if (products.isEmpty()) {
+                    logger.warn("No products found to scroll to");
+                    break;
                 }
 
-                logger.debug("Scroll iteration: {}/{}. Products now: {}",
-                        i + 1, scrollCount, getVisibleProductCount());
+                // Scroll to LAST product (triggers lazy load)
+                org.openqa.selenium.WebElement lastProduct = products.get(products.size() - 1);
+                ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                        "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                        lastProduct
+                );
+
+                WaitHelper.microPause(); // 200ms for smooth scroll
+
+                // Smart wait for new products (max 5s)
+                org.openqa.selenium.support.ui.WebDriverWait wait =
+                        new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofSeconds(5));
+
+                try {
+                    wait.until(driver -> {
+                        int currentCount = getVisibleProductCount();
+                        return currentCount > beforeScrollCount;
+                    });
+
+                    int afterScrollCount = getVisibleProductCount();
+                    logger.info("After scroll " + (i + 1) + ": " + afterScrollCount + " products loaded");
+
+                } catch (org.openqa.selenium.TimeoutException e) {
+                    logger.debug("No new products loaded (may be at end of results)");
+                    break; // Stop scrolling if no more products
+                }
+
+            } catch (Exception e) {
+                logger.error("Error during scroll " + (i + 1), e);
+                break;
             }
-
-            int finalCount = getVisibleProductCount();
-            logger.info("After scrolling {} times, visible products: {}", scrollCount, finalCount);
-
-        } catch (Exception e) {
-            logger.error("Error scrolling to load products", e);
         }
-    }
 
+        logger.info("Scrolling completed");
+    }
     /**
      * Scroll to specific product index
      *
@@ -775,4 +792,214 @@ public class SearchResultsPage extends BasePage {
             logger.error("Error scrolling to product at index: {}", index, e);
         }
     }
+    // ==================== NEW LOCATORS (Add to existing locators section) ====================
+
+    /**
+     * Sorting dropdown button
+     */
+    private static final By SORT_DROPDOWN_BTN = By.cssSelector(".web-sort-options button.select-box");
+
+    /**
+     * Sorting options list
+     */
+    private static final By SORT_OPTIONS_LIST = By.cssSelector("ul.select-dropdown");
+
+    /**
+     * Individual sort option
+     * Options: "Önerilen Sıralama", "En Düşük Fiyat", "En Yüksek Fiyat", "En Yeniler"
+     */
+    private static final By SORT_OPTION_ITEM = By.cssSelector("ul.select-dropdown li");
+
+    /**
+     * Price filter section (collapsed by default)
+     */
+    private static final By PRICE_FILTER_SECTION = By.cssSelector("section[data-aggregationtype='Price']");
+
+    /**
+     * Price filter min input
+     */
+    private static final By PRICE_MIN_INPUT = By.cssSelector("#price-range-input-min");
+
+    /**
+     * Price filter max input
+     */
+    private static final By PRICE_MAX_INPUT = By.cssSelector("#price-range-input-max");
+
+    /**
+     * Price filter apply button
+     */
+    private static final By PRICE_APPLY_BTN = By.cssSelector("button.price-range-button");
+
+// ==================== NEW METHODS (Add to class) ====================
+
+    /**
+     * Select sorting option
+     *
+     * TRENDYOL OPTIONS:
+     * - "Önerilen Sıralama" (Recommended)
+     * - "En Düşük Fiyat" (Lowest Price)
+     * - "En Yüksek Fiyat" (Highest Price)
+     * - "En Yeniler" (Newest)
+     * - "En Çok Satan" (Best Selling)
+     *
+     * @param sortOption Turkish sort option text
+     */
+    public void selectSortOption(String sortOption) {
+        try {
+            // Click dropdown to open
+            ElementHelper.safeClick(driver, driver.findElement(SORT_DROPDOWN_BTN));
+            WaitHelper.microPause();
+
+            logger.info("Selecting sort option: " + sortOption);
+
+            // Find and click option
+            java.util.List<org.openqa.selenium.WebElement> options =
+                    driver.findElements(SORT_OPTION_ITEM);
+
+            for (org.openqa.selenium.WebElement option : options) {
+                String optionText = ElementHelper.safeGetText(driver, option);
+                if (optionText.contains(sortOption)) {
+                    option.click();
+                    logger.info("Sort option selected: " + sortOption);
+
+                    // Wait for results to reload
+                    waitForProductsToLoad();
+                    return;
+                }
+            }
+
+            logger.warn("Sort option not found: " + sortOption);
+
+        } catch (Exception e) {
+            logger.error("Error selecting sort option: " + sortOption, e);
+        }
+    }
+
+    /**
+     * Apply price filter with min and max
+     *
+     * @param minPrice Minimum price (e.g., 5000)
+     * @param maxPrice Maximum price (e.g., 10000)
+     */
+    public void applyPriceFilter(String minPrice, String maxPrice) {
+        try {
+            // Expand price filter section if collapsed
+            expandFilterSection(PRICE_FILTER_SECTION);
+
+            logger.info("Applying price filter: " + minPrice + " - " + maxPrice);
+
+            // Enter min price
+            org.openqa.selenium.WebElement minInput = driver.findElement(PRICE_MIN_INPUT);
+            minInput.clear();
+            minInput.sendKeys(minPrice);
+            WaitHelper.microPause();
+
+            // Enter max price
+            org.openqa.selenium.WebElement maxInput = driver.findElement(PRICE_MAX_INPUT);
+            maxInput.clear();
+            maxInput.sendKeys(maxPrice);
+            WaitHelper.microPause();
+
+            // Click apply button
+            ElementHelper.safeClick(driver, driver.findElement(PRICE_APPLY_BTN));
+
+            logger.info("Price filter applied successfully");
+
+            // Wait for filtered results
+            waitForProductsToLoad();
+
+        } catch (Exception e) {
+            logger.error("Error applying price filter", e);
+        }
+    }
+
+    /**
+     * Apply minimum price filter only
+     *
+     * @param minPrice Minimum price
+     */
+    public void applyMinPriceFilter(String minPrice) {
+        applyPriceFilter(minPrice, "");
+    }
+
+    /**
+     * Apply maximum price filter only
+     *
+     * @param maxPrice Maximum price
+     */
+    public void applyMaxPriceFilter(String maxPrice) {
+        applyPriceFilter("", maxPrice);
+    }
+
+    /**
+     * Expand filter section if collapsed
+     *
+     * @param sectionLocator Section locator
+     */
+    private void expandFilterSection(By sectionLocator) {
+        try {
+            org.openqa.selenium.WebElement section = driver.findElement(sectionLocator);
+
+            // Check if section is collapsed
+            if (section.getAttribute("class").contains("collapsed")) {
+                // Click expand button
+                org.openqa.selenium.WebElement expandBtn =
+                        section.findElement(By.cssSelector("button.expand-collapse-button"));
+                expandBtn.click();
+                WaitHelper.microPause();
+                logger.debug("Filter section expanded");
+            }
+
+        } catch (Exception e) {
+            logger.debug("Section already expanded or error expanding", e);
+        }
+    }
+
+    /**
+     * Get first product price (for sorting validation)
+     *
+     * @return Price as double (parsed from "9.499 TL" format)
+     */
+    public double getFirstProductPrice() {
+        try {
+            String priceText = getProductPriceByIndex(0);
+
+            // Parse "9.499 TL" → 9499.0
+            String numericPrice = priceText
+                    .replace(" TL", "")
+                    .replace(".", "")
+                    .replace(",", ".");
+
+            return Double.parseDouble(numericPrice);
+
+        } catch (Exception e) {
+            logger.error("Error getting first product price", e);
+            return 0.0;
+        }
+    }
+
+    /**
+     * Get last visible product price
+     *
+     * @return Price as double
+     */
+    public double getLastVisibleProductPrice() {
+        try {
+            int lastIndex = getVisibleProductCount() - 1;
+            String priceText = getProductPriceByIndex(lastIndex);
+
+            String numericPrice = priceText
+                    .replace(" TL", "")
+                    .replace(".", "")
+                    .replace(",", ".");
+
+            return Double.parseDouble(numericPrice);
+
+        } catch (Exception e) {
+            logger.error("Error getting last product price", e);
+            return 0.0;
+        }
+    }
+
+
 }
